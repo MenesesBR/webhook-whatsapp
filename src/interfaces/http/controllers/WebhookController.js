@@ -1,6 +1,8 @@
 const logger = require('../../../config/logger');
 const config = require('../../../config/environment');
 const axios = require('axios');
+const mongodb = require('../../../infrastructure/database/mongodb');
+const { MongoClient } = require('mongodb');
 
 class WebhookController {
     constructor() {
@@ -45,7 +47,7 @@ class WebhookController {
                     expectedMode: 'subscribe',
                     tokenMatch: token === config.webhook.verifyToken
                 });
-                return res.status(403).json({ 
+                return res.status(403).json({
                     error: 'Verification failed',
                     details: 'Invalid mode or token'
                 });
@@ -56,9 +58,9 @@ class WebhookController {
                 stack: error.stack,
                 query: req.query
             });
-            return res.status(500).json({ 
+            return res.status(500).json({
                 error: 'Internal server error',
-                message: error.message 
+                message: error.message
             });
         }
     }
@@ -107,9 +109,9 @@ class WebhookController {
                 error: error.message,
                 stack: error.stack
             });
-            res.status(500).json({ 
+            res.status(500).json({
                 error: 'Internal server error',
-                message: error.message 
+                message: error.message
             });
         }
     }
@@ -122,23 +124,40 @@ class WebhookController {
             }
 
             const message = value.messages[0];
-            const userId = message.from;
+            const userPhoneNumber = message.from;
+
+            if (!userPhoneNumber) {
+                logger.error('No user phone number found in message:', message);
+                return;
+            }
+
             const phoneNumberId = value.metadata.phone_number_id;
 
-            if (!userId) {
-                logger.warn('No user ID found in message:', message);
-                return;
+            const clientsData = mongodb.getDbConnection('clientsDataCollections').clients_data;
+            const clientBotData = clientsData.find(client => client.metaPhoneNumberId == phoneNumberId);
+            const clientBotId = clientBotData.blipBotId;
+
+            let clientBotUsers = mongodb.getDbConnection('blipBotCollections')[clientBotId];
+            let clientBotUserData = clientBotUsers.find(user => user.phoneNumber == userPhoneNumber);
+
+            if (!clientBotUserData) {
+                logger.info('No user data found in database:', userPhoneNumber);
+                const password = Buffer.from(Math.random().toString()).toString('base64').substring(0, 10);
+                await mongodb.createUser(userPhoneNumber, password, clientBotId);
+
+                clientBotUsers = mongodb.getDbConnection('blipBotCollections')[clientBotId];
+                clientBotUserData = clientBotUsers.find(user => user.phoneNumber == userPhoneNumber);
             }
 
             logger.info('Processing received message:', {
                 phoneNumberId: phoneNumberId,
-                userId: userId,
+                userPhoneNumber: userPhoneNumber,
                 messageType: message.type,
                 timestamp: message.timestamp
             });
 
             // Call external API instead of local processing
-            await this.callExternalApi(message, userId, phoneNumberId);
+            await this.callExternalApi(message, userPhoneNumber, phoneNumberId, clientBotUserData);
         } catch (error) {
             logger.error('Error processing received message:', {
                 error: error.message,
@@ -148,13 +167,13 @@ class WebhookController {
         }
     }
 
-    async callExternalApi(message, userId, phoneNumberId) {
+    async callExternalApi(message, userPhoneNumber, phoneNumberId) {
         try {
             const response = await axios.post(
                 `${config.api.baseUrl}/process-message`,
                 {
                     message,
-                    userId,
+                    userPhoneNumber,
                     phoneNumberId
                 },
                 {
@@ -167,7 +186,7 @@ class WebhookController {
 
             logger.info('Message successfully forwarded to external API:', {
                 status: response.status,
-                userId: userId
+                userPhoneNumber: userPhoneNumber
             });
 
             return response.data;
