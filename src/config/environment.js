@@ -8,11 +8,11 @@ module.exports = {
         authToken: process.env.META_AUTH_TOKEN,
         phoneNumberId: process.env.PHONE_NUMBER_ID
     },
-    blip: {
-        botDomain: process.env.BOT_DOMAIN,
-        wsUri: 'wss://ws.0mn.io:443'
-    },
     webhook: {
         verifyToken: process.env.VERIFY_TOKEN
+    },
+    api: {
+        baseUrl: process.env.API_BASE_URL,
+        authToken: process.env.API_AUTH_TOKEN
     }
 }; 

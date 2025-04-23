@@ -1,4 +1,4 @@
-const logger = require('../../../infrastructure/config/logger');
+const logger = require('../../../config/logger');
 
 const requestLogger = (req, res, next) => {
     logger.info(`[REQUEST] ${req.method} ${req.url}`);

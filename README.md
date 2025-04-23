@@ -1,6 +1,6 @@
-# Webhook WhatsApp + BLIP SDK
+# Webhook WhatsApp
 
-Este é um servidor webhook para integração com a API do WhatsApp Business e a plataforma BLIP.
+Este é um servidor webhook para integração com a API do WhatsApp Business.
 
 ## Estrutura do Projeto
 
@@ -9,38 +9,14 @@ src/
 ├── config/
 │   ├── environment.js
 │   └── logger.js
-├── core/
-│   ├── domain/
-│   │   ├── entities/
-│   │   │   └── User.js
-│   │   └── repositories/
-│   │       └── UserRepository.js
-│   └── services/
-│       ├── blip/
-│       │   ├── BlipClient.js
-│       │   ├── BlipConnection.js
-│       │   └── BlipMessageService.js
-│       ├── whatsapp/
-│       │   ├── WhatsAppClient.js
-│       │   └── WhatsAppMessageService.js
-│       └── message/
-│           ├── MessageProcessor.js
-│           └── MessageService.js
-├── infrastructure/
-│   ├── persistence/
-│   │   └── FileUserRepository.js
-│   └── logging/
-│       └── FileLogger.js
 ├── interfaces/
-│   ├── http/
-│   │   ├── controllers/
-│   │   │   └── WebhookController.js
-│   │   ├── middlewares/
-│   │   │   └── RequestLogger.js
-│   │   └── routes/
-│   │       └── webhook.js
-│   └── websocket/
-│       └── BlipWebSocket.js
+│   └── http/
+│       ├── controllers/
+│       │   └── WebhookController.js
+│       ├── middlewares/
+│       │   └── RequestLogger.js
+│       └── routes/
+│           └── webhook.js
 └── main.js
 ```
 
@@ -57,8 +33,8 @@ npm install
   - `VERIFY_TOKEN`: Token de verificação do webhook (você define)
   - `META_AUTH_TOKEN`: Token de acesso da API do WhatsApp (obtenha no painel da Meta)
   - `PHONE_NUMBER_ID`: ID do número do WhatsApp (obtenha no painel da Meta)
-  - `BOT_ID`: ID do bot no BLIP
-  - `BOT_DOMAIN`: Domínio do bot no BLIP
+  - `API_BASE_URL`: URL da API externa que processará as mensagens
+  - `API_AUTH_TOKEN`: Token de autorização para a API externa
   - `PORT`: Porta em que o servidor irá rodar (opcional, padrão: 3000)
 
 3. Configure o ngrok:
@@ -84,19 +60,15 @@ start-ngrok.bat
 ## Funcionalidades
 
 - Recebe mensagens do WhatsApp
-- Processa mensagens via BLIP
-- Envia respostas via WhatsApp
-- Suporta mensagens de texto, botões e listas
+- Encaminha mensagens para uma API externa
 - Sistema de logging
-- Gerenciamento de usuários
+- Rota de health check
 
 ## Arquitetura
 
-O projeto segue uma arquitetura limpa (Clean Architecture) com as seguintes camadas:
+O projeto segue uma arquitetura simples e focada:
 
-- **Domain**: Contém as entidades e interfaces de repositório
-- **Core**: Contém a lógica de negócio e serviços
-- **Infrastructure**: Implementações concretas de repositórios e logging
+- **Config**: Configurações do servidor e logging
 - **Interfaces**: Controllers, rotas e middlewares HTTP
 
 ## Segurança

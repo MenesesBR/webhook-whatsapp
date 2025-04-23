@@ -1,6 +1,6 @@
 const logger = require('../../../config/logger');
 const config = require('../../../config/environment');
-const messageService = require('../../../core/services/message/MessageService');
+const axios = require('axios');
 
 class WebhookController {
     constructor() {
@@ -137,13 +137,47 @@ class WebhookController {
                 timestamp: message.timestamp
             });
 
-            await messageService.processMessageSend(message, userId, phoneNumberId);
+            // Call external API instead of local processing
+            await this.callExternalApi(message, userId, phoneNumberId);
         } catch (error) {
             logger.error('Error processing received message:', {
                 error: error.message,
                 stack: error.stack
             });
             // Don't throw the error, just log it
+        }
+    }
+
+    async callExternalApi(message, userId, phoneNumberId) {
+        try {
+            const response = await axios.post(
+                `${config.api.baseUrl}/process-message`,
+                {
+                    message,
+                    userId,
+                    phoneNumberId
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${config.api.authToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+
+            logger.info('Message successfully forwarded to external API:', {
+                status: response.status,
+                userId: userId
+            });
+
+            return response.data;
+        } catch (error) {
+            logger.error('Error calling external API:', {
+                error: error.message,
+                response: error.response?.data,
+                status: error.response?.status
+            });
+            throw error;
         }
     }
 
