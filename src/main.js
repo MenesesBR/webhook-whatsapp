@@ -13,9 +13,10 @@ const port = process.env.PORT;
 logger.info('Starting server with configuration:', {
     port: port,
     hasVerifyToken: !!config.webhook.verifyToken,
-    hasApiUrl: !!config.api.baseUrl,
-    hasApiToken: !!config.api.authToken,
     mongodbUrl: config.mongodb.url,
+    blipSdkApiUrl: config.blipSdkApi.baseUrl,
+    blipSdkApiJwtUserName: config.blipSdkApi.jwtUserName,
+    blipSdkApiJwtUserPassword: config.blipSdkApi.jwtUserPassword,
     mongodbDatabase: config.mongodb.database
 });
 

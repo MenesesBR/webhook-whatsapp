@@ -7,9 +7,10 @@ module.exports = {
     webhook: {
         verifyToken: process.env.VERIFY_TOKEN
     },
-    api: {
-        baseUrl: process.env.API_BASE_URL,
-        authToken: process.env.API_AUTH_TOKEN
+    blipSdkApi: {
+        baseUrl: process.env.BLIP_SDK_API_BASE_URL,
+        jwtUserName: process.env.BLIP_SDK_API_JWT_USER_NAME,
+        jwtUserPassword: process.env.BLIP_SDK_API_JWT_USER_PASSWORD
     },
     mongodb: {
         url: process.env.MONGODB_URL,

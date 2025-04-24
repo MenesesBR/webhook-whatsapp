@@ -2,10 +2,10 @@ const logger = require('../../../config/logger');
 const config = require('../../../config/environment');
 const axios = require('axios');
 const mongodb = require('../../../infrastructure/database/mongodb');
-const { MongoClient } = require('mongodb');
 
 class WebhookController {
     constructor() {
+        this.userInfo = new Map();
         // Bind methods to maintain 'this' context
         this.handleMessage = this.handleMessage.bind(this);
         this.handleReceivedMessage = this.handleReceivedMessage.bind(this);
@@ -131,10 +131,10 @@ class WebhookController {
                 return;
             }
 
-            const phoneNumberId = value.metadata.phone_number_id;
+            const metaPhoneNumberId = value.metadata.phone_number_id;
 
             const clientsData = mongodb.getDbConnection('clientsDataCollections').clients_data;
-            const clientBotData = clientsData.find(client => client.metaPhoneNumberId == phoneNumberId);
+            const clientBotData = clientsData.find(client => client.metaPhoneNumberId == metaPhoneNumberId);
             const clientBotId = clientBotData.blipBotId;
 
             let clientBotUsers = mongodb.getDbConnection('blipBotCollections')[clientBotId];
@@ -150,14 +150,32 @@ class WebhookController {
             }
 
             logger.info('Processing received message:', {
-                phoneNumberId: phoneNumberId,
+                metaPhoneNumberId: metaPhoneNumberId,
                 userPhoneNumber: userPhoneNumber,
                 messageType: message.type,
                 timestamp: message.timestamp
             });
 
+            const blipSdkRequest = {
+                headers: {
+                    'Authorization': "",
+                    'Content-Type': 'application/json'
+                },
+                data: {
+                    blipBotId: clientBotId,
+                    metaPhoneNumberId,
+                    userPhoneNumber,
+                    userId: `${clientBotUserData.phoneNumber}.${clientBotId}@${clientBotData.userDomain}`,
+                    userPassword: clientBotUserData.password,
+                    metaAuthToken: clientBotData.metaAuthToken,
+                    userDomain: clientBotData.userDomain,
+                    wsUri: clientBotData.wsUri,
+                    message,
+                }
+            }
+
             // Call external API instead of local processing
-            await this.callExternalApi(message, userPhoneNumber, phoneNumberId, clientBotUserData);
+            await this.callBlipSdkMessagesApi(blipSdkRequest);
         } catch (error) {
             logger.error('Error processing received message:', {
                 error: error.message,
@@ -167,26 +185,20 @@ class WebhookController {
         }
     }
 
-    async callExternalApi(message, userPhoneNumber, phoneNumberId) {
+    async callBlipSdkMessagesApi(blipSdkRequest) {
         try {
+            blipSdkRequest.headers.Authorization = await this.getJwtToken();
             const response = await axios.post(
-                `${config.api.baseUrl}/process-message`,
+                `${config.blipSdkApi.baseUrl}/api/blip/messages`,
+                blipSdkRequest.data,
                 {
-                    message,
-                    userPhoneNumber,
-                    phoneNumberId
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${config.api.authToken}`,
-                        'Content-Type': 'application/json'
-                    }
+                    headers: blipSdkRequest.headers
                 }
             );
 
             logger.info('Message successfully forwarded to external API:', {
                 status: response.status,
-                userPhoneNumber: userPhoneNumber
+                userPhoneNumber: blipSdkRequest.data
             });
 
             return response.data;
@@ -195,6 +207,44 @@ class WebhookController {
                 error: error.message,
                 response: error.response?.data,
                 status: error.response?.status
+            });
+            throw error;
+        }
+    }
+
+    async getJwtToken() {
+
+        try {
+            let jwtToken = this.userInfo.get(config.blipSdkApi.jwtUserName);
+
+            if (jwtToken) {
+                try {
+                    const checkJwtToken = await axios.get(`${config.blipSdkApi.baseUrl}/api/health`, {
+                        headers: {
+                            'Authorization': jwtToken
+                        }
+                    });
+
+                    if (checkJwtToken.status === 200) {
+                        return jwtToken;
+                    }
+                } catch (error) {
+                }
+            }
+
+            const jwtTokenResponse = await axios.post(`${config.blipSdkApi.baseUrl}/api/auth/login`, {
+                username: config.blipSdkApi.jwtUserName,
+                password: config.blipSdkApi.jwtUserPassword
+            });
+
+            jwtToken = `Bearer ${jwtTokenResponse.data.token}`;
+            this.userInfo.set(config.blipSdkApi.jwtUserName, jwtToken);
+
+            return jwtToken;
+        } catch (error) {
+            logger.error('Error getting JWT token:', {
+                error: error.message,
+                stack: error.stack
             });
             throw error;
         }
