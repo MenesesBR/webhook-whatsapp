@@ -6,6 +6,8 @@ const mongodb = require('../../../infrastructure/database/mongodb');
 class WebhookController {
     constructor() {
         this.userInfo = new Map();
+        this.processedMessages = new Map();
+        this.processingLocks = new Map();
         // Bind methods to maintain 'this' context
         this.handleMessage = this.handleMessage.bind(this);
         this.handleReceivedMessage = this.handleReceivedMessage.bind(this);
@@ -104,7 +106,6 @@ class WebhookController {
             // Always return 200 for valid webhook notifications
             res.status(200).send('EVENT_RECEIVED');
         } catch (error) {
-            // Only log and return 500 for unexpected errors
             logger.error('Unexpected error handling webhook message:', {
                 error: error.message,
                 stack: error.stack
@@ -124,6 +125,7 @@ class WebhookController {
             }
 
             const message = value.messages[0];
+            const messageId = message.id;
             const userPhoneNumber = message.from;
 
             if (!userPhoneNumber) {
@@ -131,74 +133,109 @@ class WebhookController {
                 return;
             }
 
-            const metaPhoneNumberId = value.metadata.phone_number_id;
-
-            const clientsData = mongodb.getDbConnection('clientsDataCollections').clients_data;
-            const clientBotData = clientsData.find(client => client.metaPhoneNumberId == metaPhoneNumberId);
-            const clientBotId = clientBotData.blipBotId;
-
-            let clientBotUsers = mongodb.getDbConnection('blipBotCollections')[clientBotId];
-            let clientBotUserData = clientBotUsers.find(user => user.phoneNumber == userPhoneNumber);
-
-            if (!clientBotUserData) {
-                logger.info('No user data found in database:', userPhoneNumber);
-                const password = Buffer.from(Math.random().toString()).toString('base64').substring(0, 10);
-                await mongodb.createUser(userPhoneNumber, password, clientBotId);
-
-                clientBotUsers = mongodb.getDbConnection('blipBotCollections')[clientBotId];
-                clientBotUserData = clientBotUsers.find(user => user.phoneNumber == userPhoneNumber);
+            // Verificar se a mensagem já está sendo processada
+            if (this.processingLocks.has(messageId)) {
+                logger.info('Message is already being processed:', messageId);
+                return;
             }
 
-            logger.info('Processing received message:', {
-                metaPhoneNumberId: metaPhoneNumberId,
-                userPhoneNumber: userPhoneNumber,
-                messageType: message.type,
-                timestamp: message.timestamp
-            });
+            // Adicionar lock para processamento
+            this.processingLocks.set(messageId, true);
 
-            const blipSdkRequest = {
-                headers: {
-                    'Authorization': "",
-                    'Content-Type': 'application/json'
-                },
-                data: {
-                    blipBotId: clientBotId,
-                    metaPhoneNumberId,
-                    userPhoneNumber,
-                    userId: `${clientBotUserData.phoneNumber}.${clientBotId}@${clientBotData.userDomain}`,
-                    userPassword: clientBotUserData.password,
-                    metaAuthToken: clientBotData.metaAuthToken,
-                    userDomain: clientBotData.userDomain,
-                    wsUri: clientBotData.wsUri,
-                    message,
+            try {
+                // Verificar se a mensagem já foi processada
+                if (await this.checkMessageExists(messageId)) {
+                    logger.info('Message already processed:', messageId);
+                    return;
                 }
-            }
 
-            // Call external API instead of local processing
-            await this.callBlipSdkMessagesApi(blipSdkRequest);
+                const metaPhoneNumberId = value.metadata.phone_number_id;
+
+                // Aguardar a obtenção dos dados do cliente
+                const clientsData = await mongodb.getDbConnection('clientsDataCollections').clients_data;
+                const clientBotData = clientsData.find(client => client.metaPhoneNumberId == metaPhoneNumberId);
+                
+                if (!clientBotData) {
+                    logger.error('No client bot data found for phone number:', metaPhoneNumberId);
+                    return;
+                }
+
+                const clientBotId = clientBotData.blipBotId;
+
+                // Aguardar a obtenção dos dados do usuário
+                let clientBotUsers = await mongodb.getDbConnection('blipBotCollections')[clientBotId];
+                let clientBotUserData = clientBotUsers.find(user => user.phoneNumber == userPhoneNumber);
+
+                if (!clientBotUserData) {
+                    logger.info('No user data found in database:', userPhoneNumber);
+                    const password = Buffer.from(Math.random().toString()).toString('base64').substring(0, 10);
+                    await mongodb.createUser(userPhoneNumber, password, clientBotId);
+
+                    // Aguardar a atualização dos dados do usuário
+                    clientBotUsers = await mongodb.getDbConnection('blipBotCollections')[clientBotId];
+                    clientBotUserData = clientBotUsers.find(user => user.phoneNumber == userPhoneNumber);
+                }
+
+                logger.info('Processing received message:', {
+                    metaPhoneNumberId: metaPhoneNumberId,
+                    userPhoneNumber: userPhoneNumber,
+                    messageType: message.type,
+                    timestamp: message.timestamp
+                });
+
+                const blipSdkRequest = {
+                    headers: {
+                        'Authorization': "",
+                        'Content-Type': 'application/json'
+                    },
+                    data: {
+                        blipBotId: clientBotId,
+                        metaPhoneNumberId,
+                        userPhoneNumber,
+                        userId: `${clientBotUserData.phoneNumber}.${clientBotId}@${clientBotData.userDomain}`,
+                        userPassword: clientBotUserData.password,
+                        metaAuthToken: clientBotData.metaAuthToken,
+                        userDomain: clientBotData.userDomain,
+                        wsUri: clientBotData.wsUri,
+                        message,
+                    }
+                }
+
+                // Aguardar o processamento da mensagem
+                await this.callBlipSdkMessagesApi(blipSdkRequest);
+                
+                // Marcar mensagem como processada
+                await this.markMessageAsProcessed(messageId);
+            } finally {
+                // Remover o lock de processamento
+                this.processingLocks.delete(messageId);
+            }
         } catch (error) {
             logger.error('Error processing received message:', {
                 error: error.message,
                 stack: error.stack
             });
-            // Don't throw the error, just log it
         }
     }
 
     async callBlipSdkMessagesApi(blipSdkRequest) {
         try {
+            // Aguardar a obtenção do token
             blipSdkRequest.headers.Authorization = await this.getJwtToken();
+            
+            // Aguardar a chamada da API
             const response = await axios.post(
                 `${config.blipSdkApi.baseUrl}/api/blip/messages`,
                 blipSdkRequest.data,
                 {
-                    headers: blipSdkRequest.headers
+                    headers: blipSdkRequest.headers,
+                    timeout: 10000 // 10 segundos de timeout
                 }
             );
 
             logger.info('Message successfully forwarded to external API:', {
                 status: response.status,
-                userPhoneNumber: blipSdkRequest.data
+                userPhoneNumber: blipSdkRequest.data.userPhoneNumber
             });
 
             return response.data;
@@ -213,29 +250,37 @@ class WebhookController {
     }
 
     async getJwtToken() {
-
         try {
             let jwtToken = this.userInfo.get(config.blipSdkApi.jwtUserName);
 
             if (jwtToken) {
                 try {
+                    // Aguardar a verificação do token
                     const checkJwtToken = await axios.get(`${config.blipSdkApi.baseUrl}/api/health`, {
-                        headers: {
-                            'Authorization': jwtToken
-                        }
+                        headers: { 'Authorization': jwtToken },
+                        timeout: 5000 // 5 segundos de timeout
                     });
 
                     if (checkJwtToken.status === 200) {
                         return jwtToken;
                     }
                 } catch (error) {
+                    // Limpar token inválido
+                    this.userInfo.delete(config.blipSdkApi.jwtUserName);
                 }
             }
 
-            const jwtTokenResponse = await axios.post(`${config.blipSdkApi.baseUrl}/api/auth/login`, {
-                username: config.blipSdkApi.jwtUserName,
-                password: config.blipSdkApi.jwtUserPassword
-            });
+            // Aguardar a obtenção de um novo token
+            const jwtTokenResponse = await axios.post(
+                `${config.blipSdkApi.baseUrl}/api/auth/login`,
+                {
+                    username: config.blipSdkApi.jwtUserName,
+                    password: config.blipSdkApi.jwtUserPassword
+                },
+                {
+                    timeout: 5000 // 5 segundos de timeout
+                }
+            );
 
             jwtToken = `Bearer ${jwtTokenResponse.data.token}`;
             this.userInfo.set(config.blipSdkApi.jwtUserName, jwtToken);
@@ -258,35 +303,35 @@ class WebhookController {
             }
 
             const status = value.statuses[0];
-            logger.info('Message status update:', {
-                messageId: status.id,
-                status: status.status,
-                timestamp: status.timestamp,
-                recipientId: status.recipient_id
-            });
+            const messageId = status.id;
 
-            // Here you can add logic to handle different statuses
-            // For example: update message status in your database
-            switch (status.status) {
-                case 'sent':
-                    logger.info(`Message ${status.id} was sent to ${status.recipient_id}`);
-                    break;
-                case 'delivered':
-                    logger.info(`Message ${status.id} was delivered to ${status.recipient_id}`);
-                    break;
-                case 'read':
-                    logger.info(`Message ${status.id} was read by ${status.recipient_id}`);
-                    break;
-                case 'failed':
-                    logger.error(`Message ${status.id} failed to send to ${status.recipient_id}:`, status.errors);
-                    break;
+            if (status.status === 'delivered' || status.status === 'read') {
+                // Aguardar a marcação da mensagem como processada
+                await this.markMessageAsProcessed(messageId);
             }
-        } catch (error) {
-            logger.error('Error processing message status:', {
-                error: error.message,
-                stack: error.stack
+
+            logger.info('Message status update:', {
+                messageId,
+                status: status.status,
+                timestamp: status.timestamp
             });
-            // Don't throw the error, just log it
+        } catch (error) {
+            logger.error('Error processing message status:', error);
+        }
+    }
+
+    async checkMessageExists(messageId) {
+        return this.processedMessages.has(messageId);
+    }
+
+    async markMessageAsProcessed(messageId) {
+        this.processedMessages.set(messageId, Date.now());
+        // Limpar mensagens antigas
+        const oneHourAgo = Date.now() - 3600000;
+        for (const [id, timestamp] of this.processedMessages) {
+            if (timestamp < oneHourAgo) {
+                this.processedMessages.delete(id);
+            }
         }
     }
 }
