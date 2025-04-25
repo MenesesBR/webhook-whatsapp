@@ -228,8 +228,7 @@ class WebhookController {
                 `${config.blipSdkApi.baseUrl}/api/blip/messages`,
                 blipSdkRequest.data,
                 {
-                    headers: blipSdkRequest.headers,
-                    timeout: 10000 // 10 segundos de timeout
+                    headers: blipSdkRequest.headers
                 }
             );
 
@@ -257,8 +256,7 @@ class WebhookController {
                 try {
                     // Aguardar a verificação do token
                     const checkJwtToken = await axios.get(`${config.blipSdkApi.baseUrl}/api/health`, {
-                        headers: { 'Authorization': jwtToken },
-                        timeout: 5000 // 5 segundos de timeout
+                        headers: { 'Authorization': jwtToken }
                     });
 
                     if (checkJwtToken.status === 200) {
@@ -276,9 +274,6 @@ class WebhookController {
                 {
                     username: config.blipSdkApi.jwtUserName,
                     password: config.blipSdkApi.jwtUserPassword
-                },
-                {
-                    timeout: 5000 // 5 segundos de timeout
                 }
             );
 
