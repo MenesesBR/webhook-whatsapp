@@ -95,10 +95,10 @@ class WebhookController {
             // Handle different types of notifications
             if (value.messages) {
                 // This is a received message
-                await this.handleReceivedMessage(value);
+                this.handleReceivedMessage(value);
             } else if (value.statuses) {
                 // This is a message status update (sent/delivered/read)
-                await this.handleMessageStatus(value);
+                this.handleMessageStatus(value);
             } else {
                 logger.warn('Unknown notification type received:', value);
             }
